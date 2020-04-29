@@ -1,36 +1,55 @@
 import requests
 import pymsteams
-from xml.etree import ElementTree
+import xmltodict
 
-#Link up with a webhook from Teams - https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using#setting-up-a-custom-incoming-webhook
-myTeamsMessage = pymsteams.connectorcard("<webhook URL>")
 
 # An array of any keywords to match in the <title>
 KEYWORDS = ["email", "cluster"]
+# Microsoft Teams webhook URL - https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using#setting-up-a-custom-incoming-webhook
+WEBHOOK_URL = ""
+# Link to the Status RSS Feed
+RSS_FEED_URL = "https://www.opensrsstatus.com/history.rss"
 
-# Get the HTTP GET Response from the URL
-response = requests.get("https://www.opensrsstatus.com/history.rss")
 
-# Format the response body from a string into the ElementTree
-xml_body = ElementTree.fromstring(response.content)
+def keyword_in_title(keywords, title):
+    for keyword in keywords:
+        if keyword in title:
+            return True
+    return False
 
-# This will leave the <channel> object as the top-level, so we can just dig into the first element
-channel = xml_body[0]
 
-# Loop over ever block inside the <channel> object
-for item in channel:
-#Find any <item> inside the <channel>
-    if item.tag == "item":
-        # Loop over each block inside the <item> we found
-        for child in item:
-            title = item[0].text
-            for keyword in KEYWORDS:
-                if keyword in title:
-                    #Array for items in the body, this isn't clean but the formatting should not change
-                    description = item[1].text
-                    pubDate = item[2].text
-                    link = item[3].text
-                    #Post message into Teams
-                    message = f"Title : {title}\n description: {description}\n Date posted: {pubDate} <br> <a href={link}>{link}</a>"
-                    myTeamsMessage.text(message)
-                    myTeamsMessage.send()
+def build_message(item):
+    title = item["title"]
+
+    description = item["description"]
+    pub_date = item["pubDate"]
+    link = item["link"]
+
+    return f"Title : {title}<br>\n" + \
+           f"Description: {description}<br>\n" + \
+           f"Date posted: {pub_date}<br>\n" + \
+           f"<a href={link}>{link}</a>"
+
+
+def post_to_teams(webhook, message):
+    teams_connector = pymsteams.connectorcard(webhook)
+    teams_connector.text(message)
+    teams_connector.send()
+
+
+if __name__ == "__main__":
+    # Get the HTTP GET Response from the URL
+    response = requests.get(RSS_FEED_URL)
+
+    # Format the response body from a string into the ElementTree
+    xml_body = xmltodict.parse(response.content)
+
+    # Loop over ever <item> inside the <channel> object
+    for item in xml_body["rss"]["channel"]["item"]:
+        if not keyword_in_title(KEYWORDS, item["title"]):
+            continue
+
+        message = build_message(item)
+        post_to_teams(WEBHOOK_URL, message)
+
+
